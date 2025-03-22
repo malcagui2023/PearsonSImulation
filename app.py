@@ -5,9 +5,13 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="SKYFLOW – FLIGHTFUSION", layout="wide")
 
-# === 🖼️ SKYFLOW Branding ===
-st.image("https://raw.githubusercontent.com/malcagui2023/PearsonSImulation/main/design.png", width=400)
-st.markdown("<h3 style='text-align:center;'>Airport Operations Management System</h3>", unsafe_allow_html=True)
+# === HEADER WITH LOGO ON RIGHT ===
+col1, col2 = st.columns([9, 1])
+with col1:
+    st.markdown("<h1 style='margin-bottom:0;'>SKYFLOW</h1>", unsafe_allow_html=True)
+    st.markdown("<h5 style='margin-top:0;'>FLIGHTFUSION – Airport Operations Management System</h5>", unsafe_allow_html=True)
+with col2:
+    st.image("https://raw.githubusercontent.com/malcagui2023/PearsonSImulation/main/design.png", width=40)
 
 # === Sidebar Controls ===
 st.sidebar.header("Simulation Settings")
@@ -63,28 +67,29 @@ def optimize_delays(row):
 
 flights["Delay (min) After"] = flights.apply(optimize_delays, axis=1)
 flights["New Time After"] = flights["Scheduled Time"] + flights["Delay (min) After"]
-flights["Improved"] = flights["Delay (min) Before"] > flights["Delay (min) After"]
-flights["Delayed After"] = flights["Delay (min) After"] > 0
 
-# === 📊 KPI Summary ===
+# === 📊 KPI Summary (with fixes) ===
+flights["Delayed After"] = flights["Delay (min) After"] > 0
+flights["Improved"] = flights["Delay (min) Before"] > flights["Delay (min) After"]
+
 avg_before = flights["Delay (min) Before"].mean()
 avg_after = flights["Delay (min) After"].mean()
-improved_count = flights["Improved"].sum()
 delayed_before = flights["Delayed Before"].sum()
 delayed_after = flights["Delayed After"].sum()
+improved_count = flights["Improved"].sum()
 
-# 💰 Cost savings
-planes_saved = delayed_before - delayed_after
-estimated_savings = int(planes_saved * 24000)
+planes_saved = (flights["Delay (min) Before"] > 0) & (flights["Delay (min) After"] == 0)
+savings_count = planes_saved.sum()
+estimated_savings = int(savings_count * 24000)
 
 st.markdown("### 💰 Potential Savings")
-st.metric("Estimated Cost Savings", f"${estimated_savings:,} CAD", delta=f"{planes_saved} planes improved")
+st.metric("Estimated Cost Savings", f"${estimated_savings:,} CAD", delta=f"{savings_count} planes improved")
 
 st.markdown("### 📊 Delay Summary")
 col1, col2, col3 = st.columns(3)
 col1.metric("⏱ Avg Delay Before", f"{avg_before:.1f} min")
 col2.metric("✅ Avg Delay After", f"{avg_after:.1f} min", delta=f"{avg_before - avg_after:.1f}")
-col3.metric("🔄 Flights Improved", f"{improved_count}/{num_flights}")
+col3.metric("📘 Flights Improved", f"{improved_count}/{num_flights}")
 
 col1.metric("⚠️ Flights Delayed Before", f"{delayed_before}")
 col2.metric("🟢 Flights Delayed After", f"{delayed_after}")
@@ -118,10 +123,9 @@ st.success(summary_msg)
 # === 🛬 Runway Utilization Chart ===
 st.markdown("### 🛬 Runway Utilization Comparison")
 
-# Assign runways before AI
 flights["Runway Before"] = np.random.choice(["RW1", "RW2"], size=num_flights)
-
 rw1_count = (flights["Runway Before"] == "RW1").sum()
+
 if rw1_count > num_flights * 0.6:
     flights["Runway After"] = np.where(
         flights["Runway Before"] == "RW1",
@@ -150,7 +154,7 @@ fig.update_layout(
 
 st.plotly_chart(fig, use_container_width=True)
 
-# === 🔁 View Toggle: Before / After / Compare ===
+# === 🔁 View Toggle ===
 view = st.radio("Select View", ["📋 Before Optimization", "🤖 After AI Optimization", "🔁 Compare Both"])
 
 if view == "📋 Before Optimization":
