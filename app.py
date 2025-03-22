@@ -8,17 +8,23 @@ st.title("🛫 AI Control Panel for Runway Scheduling & Weather Delays")
 # Sidebar Inputs
 st.sidebar.header("Simulation Settings")
 
-# Scenario dropdown
-performance = st.sidebar.selectbox("Performance Scenario", ["Bad", "Medium", "Good", "Excellent"])
-weather = st.sidebar.selectbox("Weather Condition", ["Clear ☀️", "Light Rain 🌧️", "Thunderstorm ⛈️", "Fog 🌫️"])
+# Scenario dropdowns
+performance = st.sidebar.selectbox(
+    "Performance Scenario",
+    ["Bad (50% delays)", "Medium (30% delays)", "Good (20% delays)", "Excellent (0% delays)"]
+)
+weather = st.sidebar.selectbox(
+    "Weather Condition",
+    ["Clear ☀️", "Light Rain 🌧️", "Thunderstorm ⛈️", "Fog 🌫️"]
+)
 num_flights = st.sidebar.slider("Number of Flights", 10, 50, 20)
 
 # Delay probability and duration factor mappings
 delay_probs = {
-    "Bad": 0.5,
-    "Medium": 0.3,
-    "Good": 0.2,
-    "Excellent": 0.0
+    "Bad (50% delays)": 0.5,
+    "Medium (30% delays)": 0.3,
+    "Good (20% delays)": 0.2,
+    "Excellent (0% delays)": 0.0
 }
 
 weather_factors = {
@@ -28,7 +34,7 @@ weather_factors = {
     "Fog 🌫️": 0.3
 }
 
-# Create flight data
+# Generate flights
 np.random.seed(1)
 flights = pd.DataFrame({
     "Flight ID": [f"F{1000 + i}" for i in range(num_flights)],
@@ -36,17 +42,64 @@ flights = pd.DataFrame({
     "Scheduled Time": np.sort(np.random.randint(0, 120, num_flights))
 })
 
-# Apply delays before AI
+# Calculate delays BEFORE optimization
 delay_chance = delay_probs[performance]
 weather_impact = weather_factors[weather]
 
-flights["Delayed"] = np.random.rand(num_flights) < delay_chance
-flights["Delay (min)"] = flights["Delayed"] * (np.random.randint(5, 30, num_flights) * (1 + weather_impact)).round()
-flights["New Time"] = flights["Scheduled Time"] + flights["Delay (min)"]
+flights["Delayed Before"] = np.random.rand(num_flights) < delay_chance
+flights["Delay (min) Before"] = flights["Delayed Before"] * (np.random.randint(5, 30, num_flights) * (1 + weather_impact)).round()
+flights["New Time Before"] = flights["Scheduled Time"] + flights["Delay (min) Before"]
 
-# Display results
-st.subheader("📋 Simulated Flight Schedule (Before AI Optimization)")
-st.dataframe(flights)
+# AI Optimization Simulation
+def optimize_delays(row):
+    if row["Delayed Before"]:
+        reduction_factor = 0.5 if delay_chance > 0 else 0
+        new_delay = max(row["Delay (min) Before"] * reduction_factor * (1 - weather_impact), 0)
+        return round(new_delay)
+    return 0
 
+flights["Delay (min) After"] = flights.apply(optimize_delays, axis=1)
+flights["New Time After"] = flights["Scheduled Time"] + flights["Delay (min) After"]
+flights["Improved"] = flights["Delay (min) Before"] > flights["Delay (min) After"]
+
+# View Toggle
+view = st.radio("Select View", ["📋 Before Optimization", "🤖 After AI Optimization", "🔁 Compare Both"])
+
+# Display Views
+if view == "📋 Before Optimization":
+    st.subheader("✈️ Flight Schedule (Before AI Optimization)")
+    st.dataframe(flights[["Flight ID", "Type", "Scheduled Time", "Delay (min) Before", "New Time Before"]])
+elif view == "🤖 After AI Optimization":
+    st.subheader("🛫 Optimized Flight Schedule (After AI)")
+    st.dataframe(flights[["Flight ID", "Type", "Scheduled Time", "Delay (min) After", "New Time After"]])
+else:
+    st.subheader("🔁 Comparison: Before vs After Optimization")
+    st.dataframe(flights[[
+        "Flight ID", "Type", "Scheduled Time",
+        "Delay (min) Before", "New Time Before",
+        "Delay (min) After", "New Time After",
+        "Improved"
+    ]])
+
+# KPI Summary
+st.markdown("### 📊 Delay Summary")
+
+col1, col2, col3 = st.columns(3)
+
+avg_before = flights["Delay (min) Before"].mean()
+avg_after = flights["Delay (min) After"].mean()
+improved_count = flights["Improved"].sum()
+delayed_before = (flights["Delay (min) Before"] > 0).sum()
+delayed_after = (flights["Delay (min) After"] > 0).sum()
+
+col1.metric("⏱ Avg Delay Before", f"{avg_before:.1f} min")
+col2.metric("✅ Avg Delay After", f"{avg_after:.1f} min", delta=f"{avg_before - avg_after:.1f}")
+col3.metric("🔄 Flights Improved", f"{improved_count}/{num_flights}")
+
+col1.metric("⚠️ Flights Delayed Before", f"{delayed_before}")
+col2.metric("🟢 Flights Delayed After", f"{delayed_after}")
+col3.metric("🌦️ Weather Impact", f"{int(weather_impact * 100)}%")
+
+# Footer Info
 st.markdown("---")
-st.info(f"Scenario: **{performance}** | Weather: **{weather}** | Delay chance: {int(delay_chance * 100)}% | Weather impact factor: {weather_impact}")
+st.info(f"Scenario: **{performance}** | Weather: **{weather}**")
