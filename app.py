@@ -3,15 +3,13 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="Pearson AI Control Tower", layout="wide")
+st.set_page_config(page_title="SKYFLOW – FLIGHTFUSION", layout="wide")
 
-# ===================
-# ✈️ FLIGHT FUSION Title & Branding
-# ===================
-st.title("🧠 FLIGHT FUSION")
-st.subheader("Integrated Airport Operations Management System")
+# === 🖼️ SKYFLOW Branding ===
+st.image("https://raw.githubusercontent.com/malcagui2023/PearsonSImulation/main/design.png", width=400)
+st.markdown("<h3 style='text-align:center;'>Airport Operations Management System</h3>", unsafe_allow_html=True)
 
-# Sidebar Inputs
+# === Sidebar Controls ===
 st.sidebar.header("Simulation Settings")
 
 performance = st.sidebar.selectbox(
@@ -38,9 +36,7 @@ weather_factors = {
     "Fog 🌫️": 0.3
 }
 
-# ===================
-# Generate flight data
-# ===================
+# === Generate Flight Data ===
 np.random.seed(1)
 flights = pd.DataFrame({
     "Flight ID": [f"F{1000 + i}" for i in range(num_flights)],
@@ -52,10 +48,12 @@ delay_chance = delay_probs[performance]
 weather_impact = weather_factors[weather]
 
 flights["Delayed Before"] = np.random.rand(num_flights) < delay_chance
-flights["Delay (min) Before"] = flights["Delayed Before"] * (np.random.randint(5, 30, num_flights) * (1 + weather_impact)).round()
+flights["Delay (min) Before"] = flights["Delayed Before"] * (
+    np.random.randint(5, 30, num_flights) * (1 + weather_impact)
+).round()
 flights["New Time Before"] = flights["Scheduled Time"] + flights["Delay (min) Before"]
 
-# AI optimization function
+# === AI Optimization ===
 def optimize_delays(row):
     if row["Delayed Before"]:
         reduction_factor = 0.5 if delay_chance > 0 else 0
@@ -68,9 +66,7 @@ flights["New Time After"] = flights["Scheduled Time"] + flights["Delay (min) Aft
 flights["Improved"] = flights["Delay (min) Before"] > flights["Delay (min) After"]
 flights["Delayed After"] = flights["Delay (min) After"] > 0
 
-# ===================
-# 📊 KPI Summary at Top
-# ===================
+# === 📊 KPI Summary ===
 avg_before = flights["Delay (min) Before"].mean()
 avg_after = flights["Delay (min) After"].mean()
 improved_count = flights["Improved"].sum()
@@ -94,8 +90,9 @@ col1.metric("⚠️ Flights Delayed Before", f"{delayed_before}")
 col2.metric("🟢 Flights Delayed After", f"{delayed_after}")
 col3.metric("🌦️ Weather Impact", f"{int(weather_impact * 100)}%")
 
-# 📣 Feedback
+# === 📣 Control Tower Feedback ===
 st.markdown("### 📣 Control Tower Feedback")
+
 if avg_before > 0:
     improvement_pct = ((avg_before - avg_after) / avg_before) * 100
 else:
@@ -118,20 +115,19 @@ else:
 
 st.success(summary_msg)
 
-# ===================
-# Runway Utilization
-# ===================
+# === 🛬 Runway Utilization Chart ===
 st.markdown("### 🛬 Runway Utilization Comparison")
 
 # Assign runways before AI
 flights["Runway Before"] = np.random.choice(["RW1", "RW2"], size=num_flights)
 
-# Rebalance if overloaded
 rw1_count = (flights["Runway Before"] == "RW1").sum()
 if rw1_count > num_flights * 0.6:
-    flights["Runway After"] = np.where(flights["Runway Before"] == "RW1",
-                                       np.random.choice(["RW1", "RW2"], size=num_flights, p=[0.4, 0.6]),
-                                       "RW2")
+    flights["Runway After"] = np.where(
+        flights["Runway Before"] == "RW1",
+        np.random.choice(["RW1", "RW2"], size=num_flights, p=[0.4, 0.6]),
+        "RW2"
+    )
 else:
     flights["Runway After"] = flights["Runway Before"]
 
@@ -144,7 +140,6 @@ fig = go.Figure(data=[
     go.Bar(name='Before AI', x=runway_summary.index, y=runway_summary["Before AI"], marker_color='indianred'),
     go.Bar(name='After AI', x=runway_summary.index, y=runway_summary["After AI"], marker_color='seagreen')
 ])
-
 fig.update_layout(
     barmode='group',
     title="Runway Allocation Comparison",
@@ -155,17 +150,17 @@ fig.update_layout(
 
 st.plotly_chart(fig, use_container_width=True)
 
-# ===================
-# View Toggle
-# ===================
+# === 🔁 View Toggle: Before / After / Compare ===
 view = st.radio("Select View", ["📋 Before Optimization", "🤖 After AI Optimization", "🔁 Compare Both"])
 
 if view == "📋 Before Optimization":
     st.subheader("✈️ Flight Schedule (Before AI Optimization)")
     st.dataframe(flights[["Flight ID", "Type", "Scheduled Time", "Delay (min) Before", "New Time Before", "Runway Before"]])
+
 elif view == "🤖 After AI Optimization":
     st.subheader("🛫 Optimized Flight Schedule (After AI)")
     st.dataframe(flights[["Flight ID", "Type", "Scheduled Time", "Delay (min) After", "New Time After", "Runway After"]])
+
 else:
     st.subheader("🔁 Comparison: Before vs After Optimization")
     st.dataframe(flights[[
