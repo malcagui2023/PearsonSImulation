@@ -124,3 +124,25 @@ else:
         "Delay (min) After", "New Time After",
         "Improved"
     ]])
+st.markdown("### 🛬 Runway Utilization Comparison")
+
+# Assign runways before AI (random)
+flights["Runway Before"] = np.random.choice(["RW1", "RW2"], size=num_flights)
+
+# AI Optimization: Rebalance if needed
+rw1_count = (flights["Runway Before"] == "RW1").sum()
+if rw1_count > num_flights * 0.6:
+    # Too many in RW1 → balance to RW2
+    flights["Runway After"] = np.where(flights["Runway Before"] == "RW1", 
+                                       np.random.choice(["RW1", "RW2"], size=num_flights, p=[0.4, 0.6]),
+                                       "RW2")
+else:
+    # Maintain or lightly improve
+    flights["Runway After"] = flights["Runway Before"]
+
+# Group and count runway use
+before_counts = flights["Runway Before"].value_counts().rename("Before AI")
+after_counts = flights["Runway After"].value_counts().rename("After AI")
+runway_df = pd.concat([before_counts, after_counts], axis=1).fillna(0)
+
+st.bar_chart(runway_df)
