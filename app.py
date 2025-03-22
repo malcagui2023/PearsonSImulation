@@ -40,8 +40,9 @@ weather_factors = {
     "Fog 🌫️": 0.3
 }
 
-# === Generate Flight Data ===
+# === Generate Flight Data with Long Delays ===
 np.random.seed(1)
+
 flights = pd.DataFrame({
     "Flight ID": [f"F{1000 + i}" for i in range(num_flights)],
     "Type": np.random.choice(["Arrival", "Departure"], size=num_flights),
@@ -51,24 +52,31 @@ flights = pd.DataFrame({
 delay_chance = delay_probs[performance]
 weather_impact = weather_factors[weather]
 
+# Base delays
 flights["Delayed Before"] = np.random.rand(num_flights) < delay_chance
 flights["Delay (min) Before"] = flights["Delayed Before"] * (
     np.random.randint(5, 30, num_flights) * (1 + weather_impact)
 ).round()
+
+# Inject long delays (240+ min)
+long_delay_indices = np.random.choice(flights.index, size=max(1, int(0.1 * num_flights)), replace=False)
+flights.loc[long_delay_indices, "Delay (min) Before"] = np.random.randint(250, 360, len(long_delay_indices))
 flights["New Time Before"] = flights["Scheduled Time"] + flights["Delay (min) Before"]
 
 # === AI Optimization ===
-def optimize_delays(row):
-    if row["Delayed Before"]:
-        reduction_factor = 0.5 if delay_chance > 0 else 0
-        new_delay = max(row["Delay (min) Before"] * reduction_factor * (1 - weather_impact), 0)
-        return round(new_delay)
+def optimize_delay(row):
+    # 10% of delays fully recovered
+    if np.random.rand() < 0.1 and row["Delay (min) Before"] > 0:
+        return 0
+    if row["Delay (min) Before"] > 0:
+        reduction = row["Delay (min) Before"] * 0.5 * (1 - weather_impact)
+        return round(max(row["Delay (min) Before"] - reduction, 0))
     return 0
 
-flights["Delay (min) After"] = flights.apply(optimize_delays, axis=1)
+flights["Delay (min) After"] = flights.apply(optimize_delay, axis=1)
 flights["New Time After"] = flights["Scheduled Time"] + flights["Delay (min) After"]
 
-# === 📊 KPI Summary (with fixes) ===
+# === 📊 KPI Summary ===
 flights["Delayed After"] = flights["Delay (min) After"] > 0
 flights["Improved"] = flights["Delay (min) Before"] > flights["Delay (min) After"]
 
@@ -78,10 +86,15 @@ delayed_before = flights["Delayed Before"].sum()
 delayed_after = flights["Delayed After"].sum()
 improved_count = flights["Improved"].sum()
 
-planes_saved = (flights["Delay (min) Before"] > 0) & (flights["Delay (min) After"] == 0)
+# === 💰 Cost Savings: Only from >240 min → ≤240 min
+planes_costly_before = flights["Delay (min) Before"] > 240
+planes_below_after = flights["Delay (min) After"] <= 240
+planes_saved = planes_costly_before & planes_below_after
+
 savings_count = planes_saved.sum()
 estimated_savings = int(savings_count * 24000)
 
+# === Display Metrics ===
 st.markdown("### 💰 Potential Savings")
 st.metric("Estimated Cost Savings", f"${estimated_savings:,} CAD", delta=f"{savings_count} planes improved")
 
