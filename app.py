@@ -103,3 +103,33 @@ col3.metric("🌦️ Weather Impact", f"{int(weather_impact * 100)}%")
 # Footer Info
 st.markdown("---")
 st.info(f"Scenario: **{performance}** | Weather: **{weather}**")
+# Dynamic performance message
+st.markdown("### 📣 Control Tower Feedback")
+
+# Calculate improvement %
+if avg_before > 0:
+    improvement_pct = ((avg_before - avg_after) / avg_before) * 100
+else:
+    improvement_pct = 0
+
+# Dynamic message based on results
+if avg_before > 15:
+    if improvement_pct >= 50:
+        summary_msg = "🧠 Severe congestion mitigated by AI. Major delays reduced."
+    elif improvement_pct > 20:
+        summary_msg = "⚠️ Heavy delays. AI made moderate improvements, but challenges remain."
+    else:
+        summary_msg = "❗ High delays persist. Consider additional runway or schedule optimization."
+elif avg_before > 5:
+    if improvement_pct >= 50:
+        summary_msg = "✅ System stabilized. AI effectively reduced moderate delays."
+    else:
+        summary_msg = "🕓 Some delay reduction achieved. Monitor runway load."
+else:
+    summary_msg = "🟢 Low delay scenario. AI kept performance optimal."
+
+st.success(summary_msg)
+
+# Display scenario info at the bottom
+st.markdown("---")
+st.info(f"Scenario: **{performance}** | Weather: **{weather}** | Delay Reduction: **{improvement_pct:.1f}%**")
