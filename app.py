@@ -48,4 +48,18 @@ tab1, tab2 = st.tabs(["🟥 Before AI Optimization", "🟩 After AI Optimization
 with tab1:
     fig1 = px.timeline(before_ai, x_start="Scheduled Time", x_end="New Time", y="Flight", color="Runway")
     fig1.update_layout(xaxis_title="Time (min)", yaxis_title="Flight", title="Delays Due to Weather")
-    st.plotly_chart(fig1, use
+    st.plotly_chart(fig1, use_container_width=True)
+
+with tab2:
+    fig2 = px.timeline(after_ai, x_start="Scheduled Time", x_end="New Time", y="Flight", color="Runway")
+    fig2.update_layout(xaxis_title="Time (min)", yaxis_title="Flight", title="AI-Optimized Schedule")
+    st.plotly_chart(fig2, use_container_width=True)
+
+# KPI Metrics
+st.subheader("📊 Impact Dashboard")
+before_delay = before_ai["Delay (min)"].mean()
+after_delay = after_ai["Delay (min)"].mean()
+
+col1, col2 = st.columns(2)
+col1.metric("⏱ Avg Delay Before AI", f"{before_delay:.1f} min")
+col2.metric("✅ Avg Delay After AI", f"{after_delay:.1f} min", delta=f"{before_delay - after_delay:.1f}")
