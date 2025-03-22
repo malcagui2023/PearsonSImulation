@@ -1,65 +1,52 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
 
-st.set_page_config(page_title="Pearson AI Control Panel", layout="wide")
-
+st.set_page_config(page_title="Pearson AI Control Tower", layout="wide")
 st.title("🛫 AI Control Panel for Runway Scheduling & Weather Delays")
 
 # Sidebar Inputs
 st.sidebar.header("Simulation Settings")
-num_flights = st.sidebar.slider("Incoming Flights per Hour", 5, 30, 15)
-weather_severity = st.sidebar.slider("Weather Severity", 0, 100, 40)
 
-# Generate Fake Flights
-np.random.seed(42)
+# Scenario dropdown
+performance = st.sidebar.selectbox("Performance Scenario", ["Bad", "Medium", "Good", "Excellent"])
+weather = st.sidebar.selectbox("Weather Condition", ["Clear ☀️", "Light Rain 🌧️", "Thunderstorm ⛈️", "Fog 🌫️"])
+num_flights = st.sidebar.slider("Number of Flights", 10, 50, 20)
+
+# Delay probability and duration factor mappings
+delay_probs = {
+    "Bad": 0.5,
+    "Medium": 0.3,
+    "Good": 0.2,
+    "Excellent": 0.0
+}
+
+weather_factors = {
+    "Clear ☀️": 0.0,
+    "Light Rain 🌧️": 0.2,
+    "Thunderstorm ⛈️": 0.4,
+    "Fog 🌫️": 0.3
+}
+
+# Create flight data
+np.random.seed(1)
 flights = pd.DataFrame({
-    "Flight": [f"F{100+i}" for i in range(num_flights)],
-    "Scheduled Time": np.sort(np.random.randint(0, 60, num_flights)),
-    "Runway": np.random.choice(["RW1", "RW2"], size=num_flights),
+    "Flight ID": [f"F{1000 + i}" for i in range(num_flights)],
+    "Type": np.random.choice(["Arrival", "Departure"], size=num_flights),
+    "Scheduled Time": np.sort(np.random.randint(0, 120, num_flights))
 })
 
-# Weather Delay Function
-def apply_weather_delay(df, severity):
-    df = df.copy()
-    delay_factor = severity / 100
-    df["Delay (min)"] = (np.random.rand(len(df)) * 30 * delay_factor).round()
-    df["New Time"] = df["Scheduled Time"] + df["Delay (min)"]
-    return df
+# Apply delays before AI
+delay_chance = delay_probs[performance]
+weather_impact = weather_factors[weather]
 
-# AI Optimizer Simulation
-def ai_optimizer(df, severity):
-    df = df.copy()
-    delay_factor = severity / 100
-    df["Delay (min)"] = (np.random.rand(len(df)) * 10 * delay_factor).round()
-    df["New Time"] = df["Scheduled Time"] + df["Delay (min)"]
-    df["Runway"] = np.where(df["New Time"] % 2 == 0, "RW1", "RW2")
-    return df
+flights["Delayed"] = np.random.rand(num_flights) < delay_chance
+flights["Delay (min)"] = flights["Delayed"] * (np.random.randint(5, 30, num_flights) * (1 + weather_impact)).round()
+flights["New Time"] = flights["Scheduled Time"] + flights["Delay (min)"]
 
-# Process both scenarios
-before_ai = apply_weather_delay(flights, weather_severity)
-after_ai = ai_optimizer(flights, weather_severity)
+# Display results
+st.subheader("📋 Simulated Flight Schedule (Before AI Optimization)")
+st.dataframe(flights)
 
-# Visual Comparison
-st.subheader("Flight Schedule Comparison")
-tab1, tab2 = st.tabs(["🟥 Before AI Optimization", "🟩 After AI Optimization"])
-
-with tab1:
-    fig1 = px.timeline(before_ai, x_start="Scheduled Time", x_end="New Time", y="Flight", color="Runway")
-    fig1.update_layout(xaxis_title="Time (min)", yaxis_title="Flight", title="Delays Due to Weather")
-    st.plotly_chart(fig1, use_container_width=True)
-
-with tab2:
-    fig2 = px.timeline(after_ai, x_start="Scheduled Time", x_end="New Time", y="Flight", color="Runway")
-    fig2.update_layout(xaxis_title="Time (min)", yaxis_title="Flight", title="AI-Optimized Schedule")
-    st.plotly_chart(fig2, use_container_width=True)
-
-# KPI Metrics
-st.subheader("📊 Impact Dashboard")
-before_delay = before_ai["Delay (min)"].mean()
-after_delay = after_ai["Delay (min)"].mean()
-
-col1, col2 = st.columns(2)
-col1.metric("⏱ Avg Delay Before AI", f"{before_delay:.1f} min")
-col2.metric("✅ Avg Delay After AI", f"{after_delay:.1f} min", delta=f"{before_delay - after_delay:.1f}")
+st.markdown("---")
+st.info(f"Scenario: **{performance}** | Weather: **{weather}** | Delay chance: {int(delay_chance * 100)}% | Weather impact factor: {weather_impact}")
