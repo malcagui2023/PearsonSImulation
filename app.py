@@ -62,36 +62,18 @@ flights["Delay (min) After"] = flights.apply(optimize_delays, axis=1)
 flights["New Time After"] = flights["Scheduled Time"] + flights["Delay (min) After"]
 flights["Improved"] = flights["Delay (min) Before"] > flights["Delay (min) After"]
 
-# View Toggle
-view = st.radio("Select View", ["📋 Before Optimization", "🤖 After AI Optimization", "🔁 Compare Both"])
-
-# Display Views
-if view == "📋 Before Optimization":
-    st.subheader("✈️ Flight Schedule (Before AI Optimization)")
-    st.dataframe(flights[["Flight ID", "Type", "Scheduled Time", "Delay (min) Before", "New Time Before"]])
-elif view == "🤖 After AI Optimization":
-    st.subheader("🛫 Optimized Flight Schedule (After AI)")
-    st.dataframe(flights[["Flight ID", "Type", "Scheduled Time", "Delay (min) After", "New Time After"]])
-else:
-    st.subheader("🔁 Comparison: Before vs After Optimization")
-    st.dataframe(flights[[
-        "Flight ID", "Type", "Scheduled Time",
-        "Delay (min) Before", "New Time Before",
-        "Delay (min) After", "New Time After",
-        "Improved"
-    ]])
-
-# KPI Summary
-st.markdown("### 📊 Delay Summary")
-
-col1, col2, col3 = st.columns(3)
-
+# === Delay Summary (Top of Page) ===
+# Calculate key metrics
 avg_before = flights["Delay (min) Before"].mean()
 avg_after = flights["Delay (min) After"].mean()
 improved_count = flights["Improved"].sum()
 delayed_before = (flights["Delay (min) Before"] > 0).sum()
 delayed_after = (flights["Delay (min) After"] > 0).sum()
 
+# KPI Summary
+st.markdown("### 📊 Delay Summary")
+
+col1, col2, col3 = st.columns(3)
 col1.metric("⏱ Avg Delay Before", f"{avg_before:.1f} min")
 col2.metric("✅ Avg Delay After", f"{avg_after:.1f} min", delta=f"{avg_before - avg_after:.1f}")
 col3.metric("🔄 Flights Improved", f"{improved_count}/{num_flights}")
@@ -100,19 +82,14 @@ col1.metric("⚠️ Flights Delayed Before", f"{delayed_before}")
 col2.metric("🟢 Flights Delayed After", f"{delayed_after}")
 col3.metric("🌦️ Weather Impact", f"{int(weather_impact * 100)}%")
 
-# Footer Info
-st.markdown("---")
-st.info(f"Scenario: **{performance}** | Weather: **{weather}**")
-# Dynamic performance message
+# === Dynamic Control Tower Feedback (Top of Page) ===
 st.markdown("### 📣 Control Tower Feedback")
 
-# Calculate improvement %
 if avg_before > 0:
     improvement_pct = ((avg_before - avg_after) / avg_before) * 100
 else:
     improvement_pct = 0
 
-# Dynamic message based on results
 if avg_before > 15:
     if improvement_pct >= 50:
         summary_msg = "🧠 Severe congestion mitigated by AI. Major delays reduced."
@@ -130,6 +107,20 @@ else:
 
 st.success(summary_msg)
 
-# Display scenario info at the bottom
-st.markdown("---")
-st.info(f"Scenario: **{performance}** | Weather: **{weather}** | Delay Reduction: **{improvement_pct:.1f}%**")
+# === View Toggle and Table Outputs ===
+view = st.radio("Select View", ["📋 Before Optimization", "🤖 After AI Optimization", "🔁 Compare Both"])
+
+if view == "📋 Before Optimization":
+    st.subheader("✈️ Flight Schedule (Before AI Optimization)")
+    st.dataframe(flights[["Flight ID", "Type", "Scheduled Time", "Delay (min) Before", "New Time Before"]])
+elif view == "🤖 After AI Optimization":
+    st.subheader("🛫 Optimized Flight Schedule (After AI)")
+    st.dataframe(flights[["Flight ID", "Type", "Scheduled Time", "Delay (min) After", "New Time After"]])
+else:
+    st.subheader("🔁 Comparison: Before vs After Optimization")
+    st.dataframe(flights[[
+        "Flight ID", "Type", "Scheduled Time",
+        "Delay (min) Before", "New Time Before",
+        "Delay (min) After", "New Time After",
+        "Improved"
+    ]])
