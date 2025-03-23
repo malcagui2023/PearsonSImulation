@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="SKYFLOW – FLIGHTFUSION", layout="wide")
 
 # === HEADER WITH LOGO ON RIGHT ===
-col1, col2 = st.columns([9, 1])
+col1, col2 = st.columns([9, 2])
 with col1:
     st.markdown("<h1 style='margin-bottom:0;'>SKYFLOW</h1>", unsafe_allow_html=True)
     st.markdown("<h5 style='margin-top:0;'>FLIGHTFUSION – Airport Operations Management System</h5>", unsafe_allow_html=True)
@@ -24,7 +24,7 @@ weather = st.sidebar.selectbox(
     "Weather Condition",
     ["Clear ☀️", "Light Rain 🌧️", "Thunderstorm ⛈️", "Fog 🌫️"]
 )
-num_flights = st.sidebar.slider("Number of Flights", 10, 50, 20)
+num_flights = st.sidebar.slider("Number of Flights", 10, 100, 30)
 
 delay_probs = {
     "Bad (50% delays)": 0.5,
@@ -65,25 +65,18 @@ flights["New Time Before"] = flights["Scheduled Time"] + flights["Delay (min) Be
 
 # === AI Optimization: Always Improve or Hold ===
 def optimize_delay(row):
-    # No delay → do nothing
     if row["Delay (min) Before"] == 0:
         return 0
-
-    # 10% of delayed flights → fully recovered
     if np.random.rand() < 0.1:
         return 0
-
-    # Reduce based on scenario severity
     if performance.startswith("Bad"):
         factor = 0.65
     elif performance.startswith("Medium"):
         factor = 0.5
     elif performance.startswith("Good"):
         factor = 0.4
-    else:  # Excellent
+    else:
         factor = 0.2
-
-    # Weather adjustment
     reduction = row["Delay (min) Before"] * factor * (1 - weather_impact)
     return round(max(row["Delay (min) Before"] - reduction, 0))
 
@@ -147,33 +140,33 @@ else:
 
 st.success(summary_msg)
 
-# === 🛬 Runway Utilization Chart ===
-st.markdown("### 🛬 Runway Utilization Comparison")
+# === 🛬 Multi-Runway Utilization Trendline ===
+st.markdown("### 🛬 Runway Utilization (20 Runways)")
 
-flights["Runway Before"] = np.random.choice(["RW1", "RW2"], size=num_flights)
-rw1_count = (flights["Runway Before"] == "RW1").sum()
+runway_list = [f"RW{i}" for i in range(1, 21)]
+flights["Runway Before"] = np.random.choice(runway_list, size=num_flights)
 
-if rw1_count > num_flights * 0.6:
-    flights["Runway After"] = np.where(
-        flights["Runway Before"] == "RW1",
-        np.random.choice(["RW1", "RW2"], size=num_flights, p=[0.4, 0.6]),
-        "RW2"
-    )
-else:
-    flights["Runway After"] = flights["Runway Before"]
+runway_counts_before = flights["Runway Before"].value_counts(normalize=True)
 
-runway_summary = pd.DataFrame({
-    "Before AI": flights["Runway Before"].value_counts(),
-    "After AI": flights["Runway After"].value_counts()
-}).fillna(0)
+def assign_runway_after(row):
+    if np.random.rand() < 0.3:
+        low_load_runways = runway_counts_before.nsmallest(5).index.tolist()
+        return np.random.choice(low_load_runways)
+    return row["Runway Before"]
 
-fig = go.Figure(data=[
-    go.Bar(name='Before AI', x=runway_summary.index, y=runway_summary["Before AI"], marker_color='indianred'),
-    go.Bar(name='After AI', x=runway_summary.index, y=runway_summary["After AI"], marker_color='seagreen')
-])
+flights["Runway After"] = flights.apply(assign_runway_after, axis=1)
+
+before_counts = flights["Runway Before"].value_counts().reindex(runway_list, fill_value=0)
+after_counts = flights["Runway After"].value_counts().reindex(runway_list, fill_value=0)
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=runway_list, y=before_counts.values,
+                         mode='lines+markers', name='Before AI', line=dict(color='red')))
+fig.add_trace(go.Scatter(x=runway_list, y=after_counts.values,
+                         mode='lines+markers', name='After AI', line=dict(color='green')))
+
 fig.update_layout(
-    barmode='group',
-    title="Runway Allocation Comparison",
+    title="Runway Utilization Trend (Before vs After AI)",
     xaxis_title="Runway",
     yaxis_title="Flights Assigned",
     height=400
