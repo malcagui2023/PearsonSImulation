@@ -11,7 +11,7 @@ with col1:
     st.markdown("<h1 style='margin-bottom:0;'>SKYFLOW</h1>", unsafe_allow_html=True)
     st.markdown("<h5 style='margin-top:0;'>FLIGHTFUSION – Airport Operations Management System</h5>", unsafe_allow_html=True)
 with col2:
-    st.image("https://raw.githubusercontent.com/malcagui2023/PearsonSImulation/main/design.png", width=40)
+    st.image("https://raw.githubusercontent.com/malcagui2023/PearsonSImulation/main/design.png", width=80)
 
 # === Sidebar Controls ===
 st.sidebar.header("Simulation Settings")
