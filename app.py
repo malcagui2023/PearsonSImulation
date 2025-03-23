@@ -63,15 +63,29 @@ long_delay_indices = np.random.choice(flights.index, size=max(1, int(0.1 * num_f
 flights.loc[long_delay_indices, "Delay (min) Before"] = np.random.randint(250, 360, len(long_delay_indices))
 flights["New Time Before"] = flights["Scheduled Time"] + flights["Delay (min) Before"]
 
-# === AI Optimization ===
+# === AI Optimization: Always Improve or Hold ===
 def optimize_delay(row):
-    # 10% of delays fully recovered
-    if np.random.rand() < 0.1 and row["Delay (min) Before"] > 0:
+    # No delay → do nothing
+    if row["Delay (min) Before"] == 0:
         return 0
-    if row["Delay (min) Before"] > 0:
-        reduction = row["Delay (min) Before"] * 0.5 * (1 - weather_impact)
-        return round(max(row["Delay (min) Before"] - reduction, 0))
-    return 0
+
+    # 10% of delayed flights → fully recovered
+    if np.random.rand() < 0.1:
+        return 0
+
+    # Reduce based on scenario severity
+    if performance.startswith("Bad"):
+        factor = 0.65
+    elif performance.startswith("Medium"):
+        factor = 0.5
+    elif performance.startswith("Good"):
+        factor = 0.4
+    else:  # Excellent
+        factor = 0.2
+
+    # Weather adjustment
+    reduction = row["Delay (min) Before"] * factor * (1 - weather_impact)
+    return round(max(row["Delay (min) Before"] - reduction, 0))
 
 flights["Delay (min) After"] = flights.apply(optimize_delay, axis=1)
 flights["New Time After"] = flights["Scheduled Time"] + flights["Delay (min) After"]
