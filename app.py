@@ -1,195 +1,329 @@
 import streamlit as st
+import yfinance as yf
 import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+import base64
+import time
+from requests.exceptions import HTTPError
+from io import BytesIO
+import datetime
 
-st.set_page_config(page_title="SKYFLOW – FLIGHTFUSION", layout="wide")
+# ==========================================================
+# Page Configuration (MUST be first Streamlit command)
+# ==========================================================
+st.set_page_config(page_title="Value Investing Checklist", layout="wide")
 
-# === HEADER WITH LOGO ON RIGHT ===
-col1, col2 = st.columns([9, 2])
-with col1:
-    st.markdown("<h1 style='margin-bottom:0;'>SKYFLOW</h1>", unsafe_allow_html=True)
-    st.markdown("<h5 style='margin-top:0;'>FLIGHTFUSION – Airport Operations Management System</h5>", unsafe_allow_html=True)
-with col2:
-    st.image("https://raw.githubusercontent.com/malcagui2023/PearsonSImulation/main/design.png", width=180)
-
-# === Sidebar Controls ===
-st.sidebar.header("Simulation Settings")
-
-performance = st.sidebar.selectbox(
-    "Performance Scenario",
-    ["Bad (50% delays)", "Medium (30% delays)", "Good (20% delays)", "Excellent (0% delays)"]
-)
-weather = st.sidebar.selectbox(
-    "Weather Condition",
-    ["Clear ☀️", "Light Rain 🌧️", "Thunderstorm ⛈️", "Fog 🌫️"]
-)
-num_flights = st.sidebar.slider("Number of Flights", 10, 100, 30)
-
-delay_probs = {
-    "Bad (50% delays)": 0.5,
-    "Medium (30% delays)": 0.3,
-    "Good (20% delays)": 0.2,
-    "Excellent (0% delays)": 0.0
-}
-
-weather_factors = {
-    "Clear ☀️": 0.0,
-    "Light Rain 🌧️": 0.2,
-    "Thunderstorm ⛈️": 0.4,
-    "Fog 🌫️": 0.3
-}
-
-# === Generate Flight Data with Long Delays ===
-np.random.seed(1)
-
-flights = pd.DataFrame({
-    "Flight ID": [f"F{1000 + i}" for i in range(num_flights)],
-    "Type": np.random.choice(["Arrival", "Departure"], size=num_flights),
-    "Scheduled Time": np.sort(np.random.randint(0, 120, num_flights))
+# ==========================================================
+# Chart Theme: Dark Theme via Matplotlib
+# ==========================================================
+plt.style.use("dark_background")
+plt.rcParams.update({
+    "axes.facecolor": "#1e1e1e",
+    "figure.facecolor": "#1e1e1e",
+    "axes.edgecolor": "#444444",
+    "axes.labelcolor": "white",
+    "xtick.color": "white",
+    "ytick.color": "white",
+    "text.color": "white",
+    "grid.color": "#444444",
+    "grid.linestyle": "--",
+    "legend.edgecolor": "white"
 })
 
-delay_chance = delay_probs[performance]
-weather_impact = weather_factors[weather]
+# ==========================================================
+# Top Section: Logo + Title + Byline
+# ==========================================================
+def load_logo_base64(logo_path: str) -> str:
+    with open(logo_path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
 
-# Base delays
-flights["Delayed Before"] = np.random.rand(num_flights) < delay_chance
-flights["Delay (min) Before"] = flights["Delayed Before"] * (
-    np.random.randint(5, 30, num_flights) * (1 + weather_impact)
-).round()
+logo_data = load_logo_base64("SCM-Analytics Logo.jfif")
+top_html = f"""
+<div style="display:flex; align-items:center; margin-bottom:0.5rem;">
+    <a href="https://scm-analytics.com/" target="_blank">
+        <img src="data:image/jpg;base64,{logo_data}" style="width:80px; margin-right:15px;" alt="SCM Analytics Logo"/>
+    </a>
+    <div>
+        <h1 style="margin:0; font-size:2rem;">Value Investing Checklist (Year-by-Year)</h1>
+        <p style="margin:0; font-size:1rem; color:lightgray;">By Manuel A. Casas</p>
+    </div>
+</div>
+"""
+st.markdown(top_html, unsafe_allow_html=True)
 
-# Inject long delays (240+ min)
-long_delay_indices = np.random.choice(flights.index, size=max(1, int(0.1 * num_flights)), replace=False)
-flights.loc[long_delay_indices, "Delay (min) Before"] = np.random.randint(250, 360, len(long_delay_indices))
-flights["New Time Before"] = flights["Scheduled Time"] + flights["Delay (min) Before"]
 
-# === AI Optimization: Always Improve or Hold ===
-def optimize_delay(row):
-    if row["Delay (min) Before"] == 0:
-        return 0
-    if np.random.rand() < 0.1:
-        return 0
-    if performance.startswith("Bad"):
-        factor = 0.65
-    elif performance.startswith("Medium"):
-        factor = 0.5
-    elif performance.startswith("Good"):
-        factor = 0.4
-    else:
-        factor = 0.2
-    reduction = row["Delay (min) Before"] * factor * (1 - weather_impact)
-    return round(max(row["Delay (min) Before"] - reduction, 0))
+# ==========================================================
+# Input: Ticker Symbol
+# ==========================================================
+ticker = st.text_input("Enter Ticker Symbol (e.g., AAPL, NVDA, RY.TO)", value="AAPL")
 
-flights["Delay (min) After"] = flights.apply(optimize_delay, axis=1)
-flights["New Time After"] = flights["Scheduled Time"] + flights["Delay (min) After"]
 
-# === 📊 KPI Summary ===
-flights["Delayed After"] = flights["Delay (min) After"] > 0
-flights["Improved"] = flights["Delay (min) Before"] > flights["Delay (min) After"]
+# ==========================================================
+# Data Loading with Retry/Backoff + Utility Functions
+# ==========================================================
+@st.cache_data(ttl=3600)
+def get_data(ticker):
+    """Fetch financials, balance sheet, history, and dividends with retry on rate-limits."""
+    for attempt in range(3):
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            bs = stock.balance_sheet if stock.balance_sheet is not None else pd.DataFrame()
+            fin = stock.financials if stock.financials is not None else pd.DataFrame()
+            hist = stock.history(period="10y")
+            div = stock.dividends if stock.dividends is not None else pd.Series(dtype="float64")
+            return info, bs, fin, hist, div
+        except HTTPError as e:
+            if "429" in str(e):
+                wait = 2 ** attempt
+                time.sleep(wait)
+                continue
+            else:
+                raise
+    st.error("❗ Too many requests—please wait a minute and try again.")
+    return {}, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.Series(dtype="float64")
 
-avg_before = flights["Delay (min) Before"].mean()
-avg_after = flights["Delay (min) After"].mean()
-delayed_before = flights["Delayed Before"].sum()
-delayed_after = flights["Delayed After"].sum()
-improved_count = flights["Improved"].sum()
 
-# === 💰 Cost Savings: Only from >240 min → ≤240 min
-planes_costly_before = flights["Delay (min) Before"] > 240
-planes_below_after = flights["Delay (min) After"] <= 240
-planes_saved = planes_costly_before & planes_below_after
+def safe_ratio(numerator, denominator):
+    try:
+        return numerator / denominator if denominator and denominator != 0 else None
+    except:
+        return None
 
-savings_count = planes_saved.sum()
-estimated_savings = int(savings_count * 24000)
 
-# === Display Metrics ===
-st.markdown("### 💰 Potential Savings")
-st.metric("Estimated Cost Savings", f"${estimated_savings:,} CAD", delta=f"{savings_count} planes improved")
+def get_recent_years(df, max_years=10):
+    if df.empty:
+        return []
+    try:
+        years = sorted({col.year for col in df.columns})
+    except Exception:
+        years = sorted({idx.year for idx in df.index})
+    return years[-max_years:]
 
-st.markdown("### 📊 Delay Summary")
-col1, col2, col3 = st.columns(3)
-col1.metric("⏱ Avg Delay Before", f"{avg_before:.1f} min")
-col2.metric("✅ Avg Delay After", f"{avg_after:.1f} min", delta=f"{avg_before - avg_after:.1f}")
-col3.metric("📘 Flights Improved", f"{improved_count}/{num_flights}")
 
-col1.metric("⚠️ Flights Delayed Before", f"{delayed_before}")
-col2.metric("🟢 Flights Delayed After", f"{delayed_after}")
-col3.metric("🌦️ Weather Impact", f"{int(weather_impact * 100)}%")
+def format_percent(value):
+    if value is None:
+        return "Missing"
+    try:
+        return f"{value*100:.1f}%"
+    except:
+        return str(value)
 
-# === 📣 Control Tower Feedback ===
-st.markdown("### 📣 Control Tower Feedback")
 
-if avg_before > 0:
-    improvement_pct = ((avg_before - avg_after) / avg_before) * 100
-else:
-    improvement_pct = 0
+# ==========================================================
+# Main Processing Block
+# ==========================================================
+if ticker:
+    try:
+        info, bs, fin, hist, div = get_data(ticker)
+        fiscal_years = get_recent_years(fin, 10)
+        if len(fiscal_years) < 10:
+            fiscal_years = get_recent_years(fin, 5)
 
-if avg_before > 15:
-    if improvement_pct >= 50:
-        summary_msg = "🧠 Severe congestion mitigated by AI. Major delays reduced."
-    elif improvement_pct > 20:
-        summary_msg = "⚠️ Heavy delays. AI made moderate improvements, but challenges remain."
-    else:
-        summary_msg = "❗ High delays persist. Consider additional runway or schedule optimization."
-elif avg_before > 5:
-    if improvement_pct >= 50:
-        summary_msg = "✅ System stabilized. AI effectively reduced moderate delays."
-    else:
-        summary_msg = "🕓 Some delay reduction achieved. Monitor runway load."
-else:
-    summary_msg = "🟢 Low delay scenario. AI kept performance optimal."
+        # ----------------------------
+        # Price Chart (Top Section)
+        # ----------------------------
+        st.subheader("📈 Stock Price (Last 10 Years)")
+        fig_price, ax_price = plt.subplots(figsize=(10, 3))
+        hist["Close"].resample("ME").last().plot(ax=ax_price, color="orange")
+        ax_price.set_title(f"{ticker} Monthly Closing Prices")
+        ax_price.set_xlabel("Date")
+        ax_price.set_ylabel("Price (USD)")
+        ax_price.grid(True)
+        st.pyplot(fig_price)
 
-st.success(summary_msg)
+        # ----------------------------
+        # Evaluate Metrics & Build Summary
+        # ----------------------------
+        summary = []
+        metric_data = {}
 
-# === 🛬 Multi-Runway Utilization Trendline ===
-st.markdown("### 🛬 Runway Utilization (20 Runways)")
+        def evaluate_metric(name, vals, threshold=None, comp=">", is_pct=True):
+            fails = 0
+            data = {}
+            for y in fiscal_years:
+                v = vals.get(y)
+                if v is None:
+                    data[y] = "Missing"
+                else:
+                    pv = v * 100 if is_pct else v
+                    data[y] = round(pv, 2)
+                    if threshold is not None:
+                        if comp == ">" and pv < threshold*100:
+                            fails += 1
+                        elif comp == "<" and pv > threshold*100:
+                            fails += 1
+            metric_data[name] = data
+            pf = "✅" if fails == 0 else "❌"
+            summary.append((name, pf, f"{len(fiscal_years)-fails} / {len(fiscal_years)} years passed"))
 
-runway_list = [f"RW{i}" for i in range(1, 21)]
-flights["Runway Before"] = np.random.choice(runway_list, size=num_flights)
+        # ROE ≥12%
+        roe = {}
+        for y in fiscal_years:
+            try:
+                net = fin.loc["Net Income", fin.columns[fin.columns.year==y]].values[0]
+                eq = bs.loc["Total Stockholder Equity", bs.columns[bs.columns.year==y]].values[0]
+                roe[y] = safe_ratio(net, eq)
+            except:
+                roe[y] = None
+        evaluate_metric("ROE ≥ 12%", roe, threshold=0.12)
 
-runway_counts_before = flights["Runway Before"].value_counts(normalize=True)
+        # ROA ≥12%
+        roa = {}
+        for y in fiscal_years:
+            try:
+                net = fin.loc["Net Income", fin.columns[fin.columns.year==y]].values[0]
+                ast = bs.loc["Total Assets", bs.columns[bs.columns.year==y]].values[0]
+                roa[y] = safe_ratio(net, ast)
+            except:
+                roa[y] = None
+        evaluate_metric("ROA ≥ 12%", roa, threshold=0.12)
 
-def assign_runway_after(row):
-    if np.random.rand() < 0.3:
-        low_load_runways = runway_counts_before.nsmallest(5).index.tolist()
-        return np.random.choice(low_load_runways)
-    return row["Runway Before"]
+        # EPS Per Share (no threshold)
+        eps = {}
+        shares = info.get("sharesOutstanding")
+        for y in fiscal_years:
+            try:
+                net = fin.loc["Net Income", fin.columns[fin.columns.year==y]].values[0]
+                eps[y] = safe_ratio(net, shares) if shares else None
+            except:
+                eps[y] = None
+        metric_data["EPS Per Share"] = {y:(round(v*100,2) if v is not None else "Missing") for y,v in eps.items()}
+        avail = sum(1 for v in eps.values() if v is not None)
+        summary.append(("EPS Per Share", "—", f"{avail} / {len(fiscal_years)} yrs avail"))
 
-flights["Runway After"] = flights.apply(assign_runway_after, axis=1)
+        # Net Margin ≥20%
+        nm = {}
+        for y in fiscal_years:
+            try:
+                net = fin.loc["Net Income", fin.columns[fin.columns.year==y]].values[0]
+                rev = fin.loc["Total Revenue", fin.columns[fin.columns.year==y]].values[0]
+                nm[y] = safe_ratio(net, rev)
+            except:
+                nm[y] = None
+        evaluate_metric("Net Margin ≥ 20%", nm, threshold=0.20)
 
-before_counts = flights["Runway Before"].value_counts().reindex(runway_list, fill_value=0)
-after_counts = flights["Runway After"].value_counts().reindex(runway_list, fill_value=0)
+        # Gross Margin ≥40%
+        gm = {}
+        for y in fiscal_years:
+            try:
+                gp = fin.loc["Gross Profit", fin.columns[fin.columns.year==y]].values[0]
+                rev = fin.loc["Total Revenue", fin.columns[fin.columns.year==y]].values[0]
+                gm[y] = safe_ratio(gp, rev)
+            except:
+                gm[y] = None
+        evaluate_metric("Gross Margin ≥ 40%", gm, threshold=0.40)
 
-fig = go.Figure()
-fig.add_trace(go.Scatter(x=runway_list, y=before_counts.values,
-                         mode='lines+markers', name='Before AI', line=dict(color='red')))
-fig.add_trace(go.Scatter(x=runway_list, y=after_counts.values,
-                         mode='lines+markers', name='After AI', line=dict(color='green')))
+        # RORC ≥18%
+        rorc = {}
+        for y in fiscal_years:
+            try:
+                net = fin.loc["Net Income", fin.columns[fin.columns.year==y]].values[0]
+                d = div[div.index.year==y].sum()
+                rorc[y] = safe_ratio(net, net - d)
+            except:
+                rorc[y] = None
+        evaluate_metric("Return on Retained Capital ≥ 18%", rorc, threshold=0.18)
 
-fig.update_layout(
-    title="Runway Utilization Trend (Before vs After AI)",
-    xaxis_title="Runway",
-    yaxis_title="Flights Assigned",
-    height=400
-)
+        # LT Debt ÷ Net Income <5x
+        try:
+            ly = fiscal_years[-1]
+            debt = bs.loc["Long Term Debt", bs.columns[bs.columns.year==ly]].values[0]
+            netl = fin.loc["Net Income", fin.columns[fin.columns.year==ly]].values[0]
+            lr = safe_ratio(debt, netl)
+            lc = f"{lr:.2f}x" if lr is not None else "Missing"
+            summary.append(("LT Debt ÷ Net Income < 5x", "✅" if lr is not None and lr<5 else "❌", lc))
+        except:
+            summary.append(("LT Debt ÷ Net Income < 5x", "⚠️", "Missing"))
 
-st.plotly_chart(fig, use_container_width=True)
+        # Pricing vs Inflation (commentary)
+        cpi = 0.032
+        pc = f"Compare price moves vs US CPI of ~{cpi*100:.1f}%. [Source: BLS] (EXAMPLE – Research on Your Own)"
+        summary.append(("Pricing Power vs. Inflation", "—", pc))
 
-# === 🔁 View Toggle ===
-view = st.radio("Select View", ["📋 Before Optimization", "🤖 After AI Optimization", "🔁 Compare Both"])
+        # Organized Labor (commentary)
+        lcmt = "Review 10-K & news for union or strike risk. [Example: Reuters 2023] (EXAMPLE – Research on Your Own)"
+        summary.append(("Organized Labor", "—", lcmt))
 
-if view == "📋 Before Optimization":
-    st.subheader("✈️ Flight Schedule (Before AI Optimization)")
-    st.dataframe(flights[["Flight ID", "Type", "Scheduled Time", "Delay (min) Before", "New Time Before", "Runway Before"]])
+        # Dividends & Buybacks (commentary)
+        yrs = sorted(set(div.index.year)) if not div.empty else []
+        if not yrs:
+            d_c = "No Dividends or Buybacks"
+            ds = "—"
+        else:
+            cuts=[]
+            for i in range(1,len(yrs)):
+                if div[div.index.year==yrs[i]].sum() < div[div.index.year==yrs[i-1]].sum():
+                    cuts.append(yrs[i])
+            d_c = f"{len(yrs)} yrs; Cuts: {cuts if cuts else 'None'} (EXAMPLE – Research on Your Own)"
+            ds = "✅" if not cuts else "❌"
+        summary.append(("Dividends & Buybacks", ds, d_c))
 
-elif view == "🤖 After AI Optimization":
-    st.subheader("🛫 Optimized Flight Schedule (After AI)")
-    st.dataframe(flights[["Flight ID", "Type", "Scheduled Time", "Delay (min) After", "New Time After", "Runway After"]])
+        # Barriers to Entry (commentary)
+        bc = (
+            "- Brand lock-in [Morningstar] (EXAMPLE – Research on Your Own)\n"
+            "- Patents & tech moat [SEC 10-K] (EXAMPLE – Research on Your Own)\n"
+            "- Scale cost advantage [HBR] (EXAMPLE – Research on Your Own)\n"
+            "- Distribution network [WSJ] (EXAMPLE – Research on Your Own)"
+        )
+        summary.append(("Barriers to Entry", "—", bc))
 
-else:
-    st.subheader("🔁 Comparison: Before vs After Optimization")
-    st.dataframe(flights[[
-        "Flight ID", "Type", "Scheduled Time",
-        "Delay (min) Before", "New Time Before", "Runway Before",
-        "Delay (min) After", "New Time After", "Runway After",
-        "Improved"
-    ]])
+        # ----------------------------
+        # TOP SECTION: Summary Table
+        # ----------------------------
+        st.subheader("📋 Summary Table")
+        df_sum = pd.DataFrame(summary, columns=["Metric", "Pass/Fail", "Value/Details"])
+        st.table(df_sum)
+
+        # ----------------------------
+        # MIDDLE SECTION: Charts & Tables
+        # ----------------------------
+        st.subheader("📊 Metrics (Year-by-Year Charts & Tables)")
+        for name, values in metric_data.items():
+            with st.expander(f"{name}", expanded=False):
+                tab_c, tab_t = st.tabs(["Chart","Table"])
+                dfm = pd.DataFrame.from_dict(values, orient="index", columns=["Value"])
+                dfm.index = dfm.index.map(int)
+                dfm["Value"] = dfm["Value"].apply(lambda x: float(x) if isinstance(x,(int,float)) else None)
+                # chart
+                fig,ax = plt.subplots(figsize=(8,3))
+                ax.plot(dfm.index, dfm["Value"], marker="o", color="tab:blue")
+                ax.set_title(name); ax.set_xlabel("Year"); ax.set_ylabel("Percentage")
+                ax.set_xticks(dfm.index); ax.grid(True,linestyle="--",linewidth=0.5)
+                tab_c.pyplot(fig, clear_figure=True)
+                # table
+                dfd = dfm.copy()
+                dfd["Value"] = dfd["Value"].apply(lambda x: f"{x:.2f}%" if isinstance(x,(int,float)) else "Missing")
+                tab_t.dataframe(dfd)
+
+        # ----------------------------
+        # BOTTOM SECTION: Narrative & Disclosure
+        # ----------------------------
+        st.subheader("🧠 Narrative Insights & Commentary")
+        st.markdown("### 🏛️ Barriers to Entry")
+        st.markdown(bc)
+        st.markdown("### 📉 Pricing Power vs. Inflation")
+        st.markdown(pc)
+        st.markdown("### 🏭 Organized Labor")
+        st.markdown(lcmt)
+        st.markdown("### LT Debt ÷ Net Income")
+        st.markdown("See Summary Table above for the latest value.")
+        st.markdown("### Dividends & Buybacks")
+        st.markdown("See Summary Table above for history & cuts.")
+        # --------------------------------------------------
+        # Export Summary CSV
+        # --------------------------------------------------
+        st.subheader("📥 Export Results")
+        csv = df_sum.to_csv(index=False).encode("utf-8")
+        st.download_button("📤 Download Summary CSV", csv, file_name=f"{ticker}_summary.csv", mime="text/csv")
+        # --------------------------------------------------
+        # Disclaimer
+        # --------------------------------------------------
+        st.markdown("---")
+        st.markdown(
+            "<small>Disclaimer: For informational purposes only. Data from Yahoo Finance; accuracy not guaranteed.</small>",
+            unsafe_allow_html=True
+        )
+
+    except Exception as e:
+        st.error(f"Error processing ticker: {e}")
