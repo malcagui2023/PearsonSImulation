@@ -4,12 +4,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import base64
 import time
-from requests.exceptions import HTTPError
 from io import BytesIO
 import datetime
 
 # ==========================================================
-# Page Configuration (MUST be first Streamlit command)
+# Page Configuration (must be first Streamlit command)
 # ==========================================================
 st.set_page_config(page_title="Value Investing Checklist", layout="wide")
 
@@ -51,45 +50,48 @@ top_html = f"""
 """
 st.markdown(top_html, unsafe_allow_html=True)
 
-
 # ==========================================================
 # Input: Ticker Symbol
 # ==========================================================
 ticker = st.text_input("Enter Ticker Symbol (e.g., AAPL, NVDA, RY.TO)", value="AAPL")
-
 
 # ==========================================================
 # Data Loading with Retry/Backoff + Utility Functions
 # ==========================================================
 @st.cache_data(ttl=3600)
 def get_data(ticker):
-    """Fetch financials, balance sheet, history, and dividends with retry on rate-limits."""
-    for attempt in range(3):
+    """
+    Fetch financials, balance sheet, history, and dividends.
+    Retries up to 5 times on rate-limit errors with exponential backoff.
+    """
+    max_attempts = 5
+    for attempt in range(max_attempts):
         try:
             stock = yf.Ticker(ticker)
             info = stock.info
-            bs = stock.balance_sheet if stock.balance_sheet is not None else pd.DataFrame()
-            fin = stock.financials if stock.financials is not None else pd.DataFrame()
+            bs   = stock.balance_sheet  or pd.DataFrame()
+            fin  = stock.financials     or pd.DataFrame()
             hist = stock.history(period="10y")
-            div = stock.dividends if stock.dividends is not None else pd.Series(dtype="float64")
+            div  = stock.dividends      or pd.Series(dtype="float64")
             return info, bs, fin, hist, div
-        except HTTPError as e:
-            if "429" in str(e):
+
+        except Exception as e:
+            msg = str(e)
+            if "Too Many Requests" in msg or "rate limit" in msg.lower():
                 wait = 2 ** attempt
+                st.warning(f"Rate limited by Yahoo Finance. Retrying in {wait}s…")
                 time.sleep(wait)
                 continue
-            else:
-                raise
-    st.error("❗ Too many requests—please wait a minute and try again.")
-    return {}, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.Series(dtype="float64")
+            raise
 
+    st.error("❗ Still rate limited after several retries—please wait a minute and try again.")
+    return {}, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.Series(dtype="float64")
 
 def safe_ratio(numerator, denominator):
     try:
         return numerator / denominator if denominator and denominator != 0 else None
     except:
         return None
-
 
 def get_recent_years(df, max_years=10):
     if df.empty:
@@ -99,16 +101,6 @@ def get_recent_years(df, max_years=10):
     except Exception:
         years = sorted({idx.year for idx in df.index})
     return years[-max_years:]
-
-
-def format_percent(value):
-    if value is None:
-        return "Missing"
-    try:
-        return f"{value*100:.1f}%"
-    except:
-        return str(value)
-
 
 # ==========================================================
 # Main Processing Block
@@ -157,18 +149,18 @@ if ticker:
             pf = "✅" if fails == 0 else "❌"
             summary.append((name, pf, f"{len(fiscal_years)-fails} / {len(fiscal_years)} years passed"))
 
-        # ROE ≥12%
+        # ---- ROE ≥12% ----
         roe = {}
         for y in fiscal_years:
             try:
                 net = fin.loc["Net Income", fin.columns[fin.columns.year==y]].values[0]
-                eq = bs.loc["Total Stockholder Equity", bs.columns[bs.columns.year==y]].values[0]
+                eq  = bs.loc["Total Stockholder Equity", bs.columns[bs.columns.year==y]].values[0]
                 roe[y] = safe_ratio(net, eq)
             except:
                 roe[y] = None
         evaluate_metric("ROE ≥ 12%", roe, threshold=0.12)
 
-        # ROA ≥12%
+        # ---- ROA ≥12% ----
         roa = {}
         for y in fiscal_years:
             try:
@@ -179,7 +171,7 @@ if ticker:
                 roa[y] = None
         evaluate_metric("ROA ≥ 12%", roa, threshold=0.12)
 
-        # EPS Per Share (no threshold)
+        # ---- EPS Per Share (no threshold) ----
         eps = {}
         shares = info.get("sharesOutstanding")
         for y in fiscal_years:
@@ -192,7 +184,7 @@ if ticker:
         avail = sum(1 for v in eps.values() if v is not None)
         summary.append(("EPS Per Share", "—", f"{avail} / {len(fiscal_years)} yrs avail"))
 
-        # Net Margin ≥20%
+        # ---- Net Margin ≥20% ----
         nm = {}
         for y in fiscal_years:
             try:
@@ -203,127 +195,50 @@ if ticker:
                 nm[y] = None
         evaluate_metric("Net Margin ≥ 20%", nm, threshold=0.20)
 
-        # Gross Margin ≥40%
+        # ---- Gross Margin ≥40% ----
         gm = {}
         for y in fiscal_years:
             try:
-                gp = fin.loc["Gross Profit", fin.columns[fin.columns.year==y]].values[0]
+                gp  = fin.loc["Gross Profit", fin.columns[fin.columns.year==y]].values[0]
                 rev = fin.loc["Total Revenue", fin.columns[fin.columns.year==y]].values[0]
                 gm[y] = safe_ratio(gp, rev)
             except:
                 gm[y] = None
         evaluate_metric("Gross Margin ≥ 40%", gm, threshold=0.40)
 
-        # RORC ≥18%
+        # ---- RORC ≥18% ----
         rorc = {}
         for y in fiscal_years:
             try:
-                net = fin.loc["Net Income", fin.columns[fin.columns.year==y]].values[0]
-                d = div[div.index.year==y].sum()
+                net  = fin.loc["Net Income", fin.columns[fin.columns.year==y]].values[0]
+                d    = div[div.index.year==y].sum()
                 rorc[y] = safe_ratio(net, net - d)
             except:
                 rorc[y] = None
         evaluate_metric("Return on Retained Capital ≥ 18%", rorc, threshold=0.18)
 
-        # LT Debt ÷ Net Income <5x
+        # ---- LT Debt ÷ Net Income <5x ----
         try:
-            ly = fiscal_years[-1]
+            ly   = fiscal_years[-1]
             debt = bs.loc["Long Term Debt", bs.columns[bs.columns.year==ly]].values[0]
             netl = fin.loc["Net Income", fin.columns[fin.columns.year==ly]].values[0]
-            lr = safe_ratio(debt, netl)
-            lc = f"{lr:.2f}x" if lr is not None else "Missing"
+            lr   = safe_ratio(debt, netl)
+            lc   = f"{lr:.2f}x" if lr is not None else "Missing"
             summary.append(("LT Debt ÷ Net Income < 5x", "✅" if lr is not None and lr<5 else "❌", lc))
         except:
             summary.append(("LT Debt ÷ Net Income < 5x", "⚠️", "Missing"))
 
-        # Pricing vs Inflation (commentary)
+        # ---- Pricing Power vs. Inflation (commentary) ----
         cpi = 0.032
-        pc = f"Compare price moves vs US CPI of ~{cpi*100:.1f}%. [Source: BLS] (EXAMPLE – Research on Your Own)"
+        pc  = f"Compare price moves vs US CPI of ~{cpi*100:.1f}%. [Source: BLS] (EXAMPLE – Research on Your Own)"
         summary.append(("Pricing Power vs. Inflation", "—", pc))
 
-        # Organized Labor (commentary)
+        # ---- Organized Labor (commentary) ----
         lcmt = "Review 10-K & news for union or strike risk. [Example: Reuters 2023] (EXAMPLE – Research on Your Own)"
         summary.append(("Organized Labor", "—", lcmt))
 
-        # Dividends & Buybacks (commentary)
+        # ---- Dividends & Buybacks (commentary) ----
         yrs = sorted(set(div.index.year)) if not div.empty else []
         if not yrs:
             d_c = "No Dividends or Buybacks"
-            ds = "—"
-        else:
-            cuts=[]
-            for i in range(1,len(yrs)):
-                if div[div.index.year==yrs[i]].sum() < div[div.index.year==yrs[i-1]].sum():
-                    cuts.append(yrs[i])
-            d_c = f"{len(yrs)} yrs; Cuts: {cuts if cuts else 'None'} (EXAMPLE – Research on Your Own)"
-            ds = "✅" if not cuts else "❌"
-        summary.append(("Dividends & Buybacks", ds, d_c))
-
-        # Barriers to Entry (commentary)
-        bc = (
-            "- Brand lock-in [Morningstar] (EXAMPLE – Research on Your Own)\n"
-            "- Patents & tech moat [SEC 10-K] (EXAMPLE – Research on Your Own)\n"
-            "- Scale cost advantage [HBR] (EXAMPLE – Research on Your Own)\n"
-            "- Distribution network [WSJ] (EXAMPLE – Research on Your Own)"
-        )
-        summary.append(("Barriers to Entry", "—", bc))
-
-        # ----------------------------
-        # TOP SECTION: Summary Table
-        # ----------------------------
-        st.subheader("📋 Summary Table")
-        df_sum = pd.DataFrame(summary, columns=["Metric", "Pass/Fail", "Value/Details"])
-        st.table(df_sum)
-
-        # ----------------------------
-        # MIDDLE SECTION: Charts & Tables
-        # ----------------------------
-        st.subheader("📊 Metrics (Year-by-Year Charts & Tables)")
-        for name, values in metric_data.items():
-            with st.expander(f"{name}", expanded=False):
-                tab_c, tab_t = st.tabs(["Chart","Table"])
-                dfm = pd.DataFrame.from_dict(values, orient="index", columns=["Value"])
-                dfm.index = dfm.index.map(int)
-                dfm["Value"] = dfm["Value"].apply(lambda x: float(x) if isinstance(x,(int,float)) else None)
-                # chart
-                fig,ax = plt.subplots(figsize=(8,3))
-                ax.plot(dfm.index, dfm["Value"], marker="o", color="tab:blue")
-                ax.set_title(name); ax.set_xlabel("Year"); ax.set_ylabel("Percentage")
-                ax.set_xticks(dfm.index); ax.grid(True,linestyle="--",linewidth=0.5)
-                tab_c.pyplot(fig, clear_figure=True)
-                # table
-                dfd = dfm.copy()
-                dfd["Value"] = dfd["Value"].apply(lambda x: f"{x:.2f}%" if isinstance(x,(int,float)) else "Missing")
-                tab_t.dataframe(dfd)
-
-        # ----------------------------
-        # BOTTOM SECTION: Narrative & Disclosure
-        # ----------------------------
-        st.subheader("🧠 Narrative Insights & Commentary")
-        st.markdown("### 🏛️ Barriers to Entry")
-        st.markdown(bc)
-        st.markdown("### 📉 Pricing Power vs. Inflation")
-        st.markdown(pc)
-        st.markdown("### 🏭 Organized Labor")
-        st.markdown(lcmt)
-        st.markdown("### LT Debt ÷ Net Income")
-        st.markdown("See Summary Table above for the latest value.")
-        st.markdown("### Dividends & Buybacks")
-        st.markdown("See Summary Table above for history & cuts.")
-        # --------------------------------------------------
-        # Export Summary CSV
-        # --------------------------------------------------
-        st.subheader("📥 Export Results")
-        csv = df_sum.to_csv(index=False).encode("utf-8")
-        st.download_button("📤 Download Summary CSV", csv, file_name=f"{ticker}_summary.csv", mime="text/csv")
-        # --------------------------------------------------
-        # Disclaimer
-        # --------------------------------------------------
-        st.markdown("---")
-        st.markdown(
-            "<small>Disclaimer: For informational purposes only. Data from Yahoo Finance; accuracy not guaranteed.</small>",
-            unsafe_allow_html=True
-        )
-
-    except Exception as e:
-        st.error(f"Error processing ticker: {e}")
+            ds  = "—
